@@ -55,6 +55,31 @@ model User {
     image         String?
     accounts      Account[]
     sessions      Session[]
+    products      Product[]
+}
+
+model Review {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    title     String
+    body      String
+    rating    Float
+    productId String
+    product  Product  @relation(fields: [productId], references: [id])
+}
+
+model Product {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    name      String
+    description String
+    reviews   Review[]
+    hasReviewsProcessed Boolean @default(false)
+    isReviewsProcessing Boolean @default(false)
+    userId   String
+    user     User     @relation(fields: [userId], references: [id])
 }
 
 model VerificationToken {
