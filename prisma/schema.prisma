@@ -62,9 +62,7 @@ model Review {
     id        String   @id @default(cuid())
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
-    title     String
-    body      String
-    rating    Float
+    text      String
     productId String
     product  Product  @relation(fields: [productId], references: [id])
 }

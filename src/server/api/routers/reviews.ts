@@ -58,27 +58,71 @@ export const reviewsRouter = createTRPCRouter({
         apiKey: env.OPEN_AI_API_KEY,
       });
       const openai = new OpenAIApi(configuration);
-      const response = await openai.createCompletion({
-        model: "text-davinci-003",
-        prompt: `Atue como um gerador de avaliações de produto.
-         Eu irei lhe fornecer as descrições de um produto e você irá me fornecer 10 
-         avaliações para esse produto, bem como uma nota para o produto de 1.0 a 5.0, aonde 
-          85% das avaliações devem ser acima de 4. Diferencie radicalmente o campo ${"`review`"} de cada avaliação. Me envie o resultado em
-            formato JSON, seguindo essa estrutura: { "reviews": [ "review": <text>, "rating": <number> ] }. 
-            A descrição do produto é: "${product?.description}”`,
-        max_tokens: 2000,
-        temperature: 0.4,
-      });
 
-      console.log(response.data);
+      await Promise.allSettled(
+        Array.from({ length: 1 }).map(
+          (item) =>
+            new Promise(async (resolve, reject) => {
+              try {
+                const response = await openai.createCompletion({
+                  model: "text-davinci-003",
+                  prompt: `
+                    I want you to generate generic positive and glowing casual social media-style product reviews. Please use the following details:
+          
+                    Product name or key features: ${product?.description}
+                    Number of reviews: 10
+                    Include Emojis flag: no
+                    Include Hashtags flag: no
+          
+                    The task is to create the specified number of reviews that highlight
+                    the product's strongest points and benefits. The reviews should be
+                    brief, sound like they were written by real people using casual 
+                    language, and not perfect English, and you also need to not 
+                    capitalize any word and not use punctuation. You can also vary 
+                    the length of the reviews and make them sound like they were 
+                    written by different people (e.g. an 18-year-old male, a 
+                    40-year-old female, or a 75-year-old woman). You should NOT mention
+                    the name of the product on the reviews. If the Include Emojis flag 
+                    is set to yes, then the reviews should include appropriate emojis. 
+                    If the Include Emojis flag is set to no, then the reviews should not 
+                    include emojis. If the Include Hashtags flag is set to yes, then the 
+                    reviews should include appropriate hashtags. If the Include Hashtags 
+                    flag is set to no, then the reviews should not include hashtags. 
+                    Give me the answer in the following 
+                    JSON format: { "reviews": [<review: string>, <review: string>,<review: string>] }. 
+                    Please only respond with the JSON, without any additional 
+                    explanations or words.
+                  `,
+                  max_tokens: 2000,
+                  temperature: 1,
+                });
 
-      let text = response.data.choices[0]?.text!;
+                const reviews = JSON.parse(response.data.choices[0]?.text!);
 
-      if (text.startsWith(".")) {
-        text = text.substring(1);
-      }
+                await prisma.product.update({
+                  where: {
+                    id: input.id,
+                  },
+                  data: {
+                    reviews: {
+                      create: reviews.reviews.map((review: string) => {
+                        return {
+                          text: review,
+                        };
+                      }),
+                    },
+                    isReviewsProcessing: false,
+                  },
+                });
 
-      const reviews = JSON.parse(text);
+                resolve({});
+              } catch (err) {
+                console.log(err);
+                reject(err);
+              }
+            })
+        )
+      );
     }),
 
   getProductInProductPage: publicProcedure
@@ -87,6 +131,9 @@ export const reviewsRouter = createTRPCRouter({
       return await ctx.prisma.product.findUnique({
         where: {
           id: input.id,
+        },
+        include: {
+          reviews: true,
         },
       });
     }),
