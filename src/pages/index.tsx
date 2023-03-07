@@ -20,7 +20,7 @@ const Home: NextPage = () => {
     {
       emojis: false,
       hashtags: false,
-      lowercase: true,
+      lowercase: false,
       quantity: 10,
       type: "specific",
     },
@@ -132,6 +132,23 @@ const Home: NextPage = () => {
                 type="checkbox"
                 name={`lowercase-${index + 1}`}
                 id={`lowercase-${index + 1}`}
+                onChange={(event) => {
+                  const value = event.target.checked;
+                  const newReviewsRequested = reviewsRequested.map(
+                    (review, reviewIndex) => {
+                      if (reviewIndex === index) {
+                        return {
+                          ...review,
+                          lowercase: value,
+                        };
+                      }
+
+                      return review;
+                    }
+                  );
+
+                  setReviewsRequested(newReviewsRequested);
+                }}
               />
               <label htmlFor={`lowercase-${index + 1}`}>Lowercase</label>
             </div>
