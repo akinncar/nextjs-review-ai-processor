@@ -27,7 +27,6 @@ const Home: NextPage = () => {
   ]);
   const router = useRouter();
 
-  const hello = api.example.hello.useQuery({ text: "from tRPC" });
   const requestReviews = api.reviews.requestReviews.useMutation({
     onSuccess: (data) => router.push(`/product/${data.id}`),
   });
@@ -38,7 +37,7 @@ const Home: NextPage = () => {
       <button
         className="w-32 bg-blue-200 p-2"
         onClick={() => {
-          signIn("google");
+          void signIn("google");
         }}
       >
         Login
@@ -51,12 +50,17 @@ const Home: NextPage = () => {
           const formData = new FormData(event.target as HTMLFormElement);
           const data = Object.fromEntries(formData.entries());
 
-          console.log(data);
-
-          // requestReviews.mutate({
-          //   description: data.description as string,
-          //   name: data.name as string,
-          // });
+          requestReviews.mutate({
+            description: data.description as string,
+            name: data.name as string,
+            reviewRequests: reviewsRequested.map((reviewRequested) => ({
+              emojis: reviewRequested.emojis,
+              hashtags: reviewRequested.hashtags,
+              lowerCase: reviewRequested.lowercase,
+              amount: reviewRequested.quantity,
+              type: reviewRequested.type,
+            })),
+          });
         }}
       >
         <label className="mb-2" htmlFor="name">
@@ -72,7 +76,7 @@ const Home: NextPage = () => {
           className="border-2 border-black"
         />
         {reviewsRequested.map((review, index) => (
-          <div className="my-3 flex items-center gap-2">
+          <div className="my-3 flex items-center gap-2" key={index}>
             <select
               name="category"
               id="category"

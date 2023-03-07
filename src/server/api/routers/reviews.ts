@@ -8,18 +8,31 @@ import {
 import { prisma } from "~/server/db";
 import { Configuration, OpenAIApi } from "openai";
 import { env } from "~/env.mjs";
+import { TRPCError } from "@trpc/server";
+import mountSpecificPrompt from "~/utils/mountSpecificPromp";
+import mountGenericPrompt from "~/utils/mountGenericPrompt";
+
+interface OpenAIReviewsResponse {
+  reviews: string[];
+}
 
 export const reviewsRouter = createTRPCRouter({
-  hello: publicProcedure
-    .input(z.object({ text: z.string() }))
-    .query(({ input }) => {
-      return {
-        greeting: `Hello ${input.text}`,
-      };
-    }),
-
   requestReviews: protectedProcedure
-    .input(z.object({ description: z.string(), name: z.string() }))
+    .input(
+      z.object({
+        description: z.string(),
+        name: z.string(),
+        reviewRequests: z.array(
+          z.object({
+            type: z.enum(["specific", "generic"]),
+            amount: z.number(),
+            lowerCase: z.boolean(),
+            emojis: z.boolean(),
+            hashtags: z.boolean(),
+          })
+        ),
+      })
+    )
     .mutation(async ({ input, ctx }) => {
       const product = await prisma.product.create({
         data: {
@@ -34,10 +47,11 @@ export const reviewsRouter = createTRPCRouter({
         },
       });
 
-      reviewsRouter
+      void reviewsRouter
         .createCaller({ prisma: ctx.prisma, session: ctx.session })
         .processReviews({
           id: product.id,
+          reviewRequests: input.reviewRequests,
         });
 
       return {
@@ -46,7 +60,20 @@ export const reviewsRouter = createTRPCRouter({
     }),
 
   processReviews: publicProcedure
-    .input(z.object({ id: z.string() }))
+    .input(
+      z.object({
+        id: z.string(),
+        reviewRequests: z.array(
+          z.object({
+            type: z.enum(["specific", "generic"]),
+            amount: z.number(),
+            lowerCase: z.boolean(),
+            emojis: z.boolean(),
+            hashtags: z.boolean(),
+          })
+        ),
+      })
+    )
     .mutation(async ({ input }) => {
       const product = await prisma.product.findUnique({
         where: {
@@ -54,50 +81,55 @@ export const reviewsRouter = createTRPCRouter({
         },
       });
 
+      if (!product) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Product not found",
+        });
+      }
+
       const configuration = new Configuration({
         apiKey: env.OPEN_AI_API_KEY,
       });
       const openai = new OpenAIApi(configuration);
 
       await Promise.allSettled(
-        Array.from({ length: 1 }).map(
-          (item) =>
-            new Promise(async (resolve, reject) => {
+        Array.from(input.reviewRequests).map(
+          (reviewRequest) =>
+            // eslint-disable-next-line @typescript-eslint/no-misused-promises
+            new Promise(async () => {
               try {
                 const response = await openai.createCompletion({
                   model: "text-davinci-003",
-                  prompt: `
-                    I want you to generate generic positive and glowing casual social media-style product reviews. Please use the following details:
-          
-                    Product name or key features: ${product?.description}
-                    Number of reviews: 10
-                    Include Emojis flag: no
-                    Include Hashtags flag: no
-          
-                    The task is to create the specified number of reviews that highlight
-                    the product's strongest points and benefits. The reviews should be
-                    brief, sound like they were written by real people using casual 
-                    language, and not perfect English, and you also need to not 
-                    capitalize any word and not use punctuation. You can also vary 
-                    the length of the reviews and make them sound like they were 
-                    written by different people (e.g. an 18-year-old male, a 
-                    40-year-old female, or a 75-year-old woman). You should NOT mention
-                    the name of the product on the reviews. If the Include Emojis flag 
-                    is set to yes, then the reviews should include appropriate emojis. 
-                    If the Include Emojis flag is set to no, then the reviews should not 
-                    include emojis. If the Include Hashtags flag is set to yes, then the 
-                    reviews should include appropriate hashtags. If the Include Hashtags 
-                    flag is set to no, then the reviews should not include hashtags. 
-                    Give me the answer in the following 
-                    JSON format: { "reviews": [<review: string>, <review: string>,<review: string>] }. 
-                    Please only respond with the JSON, without any additional 
-                    explanations or words.
-                  `,
+                  prompt:
+                    reviewRequest.type === "specific"
+                      ? mountSpecificPrompt({
+                          productDescription: product.description,
+                          emojis: reviewRequest.emojis,
+                          hashtags: reviewRequest.hashtags,
+                          lowerCase: reviewRequest.lowerCase,
+                          amount: reviewRequest.amount,
+                        })
+                      : mountGenericPrompt({
+                          emojis: reviewRequest.emojis,
+                          hashtags: reviewRequest.hashtags,
+                          lowerCase: reviewRequest.lowerCase,
+                          amount: reviewRequest.amount,
+                        }),
                   max_tokens: 2000,
                   temperature: 1,
                 });
 
-                const reviews = JSON.parse(response.data.choices[0]?.text!);
+                if (!response.data.choices[0]?.text) {
+                  throw new TRPCError({
+                    code: "INTERNAL_SERVER_ERROR",
+                    message: "OpenAI API error",
+                  });
+                }
+
+                const reviews = JSON.parse(
+                  response.data.choices[0].text
+                ) as OpenAIReviewsResponse;
 
                 await prisma.product.update({
                   where: {
@@ -105,7 +137,7 @@ export const reviewsRouter = createTRPCRouter({
                   },
                   data: {
                     reviews: {
-                      create: reviews.reviews.map((review: string) => {
+                      create: reviews.reviews.map((review) => {
                         return {
                           text: review,
                         };
@@ -114,11 +146,8 @@ export const reviewsRouter = createTRPCRouter({
                     isReviewsProcessing: false,
                   },
                 });
-
-                resolve({});
               } catch (err) {
                 console.log(err);
-                reject(err);
               }
             })
         )
